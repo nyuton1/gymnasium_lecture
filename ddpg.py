@@ -26,8 +26,9 @@ from stable_baselines3.common.callbacks import (
     CheckpointCallback,
     EvalCallback,
 )
+from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.noise import NormalActionNoise
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from gym_utils import record_agent_video
 
@@ -40,21 +41,31 @@ VIDEO_FOLDER = "ddpg_bipedalwalkerhardcore_videos_practice"
 FINAL_MODEL = "ddpg_bipedalwalkerhardcore"
 
 
-def train(timesteps: int) -> None:
+def train(timesteps: int, n_envs: int) -> None:
     """DDPG モデルを学習し、チェックポイント・ベストモデル・最終モデルを保存する。"""
     os.makedirs(LOG_DIR, exist_ok=True)
 
     # -------------------------------------------------------------------------
-    # 1. 学習用環境と評価用環境
+    # 1. 学習用環境（SubprocVecEnv で並列収集）と評価用環境
+    #    学習に描画は不要なので render_mode は付けない（高速化）。
+    #    n_envs=1 のときは subprocess 起動コストを避けて DummyVecEnv にフォールバック。
+    #    make_vec_env が各 env を Monitor で自動ラップし ep_rew_mean を記録する。
     # -------------------------------------------------------------------------
-    env = gym.make(ENV_ID, render_mode="rgb_array")
+    vec_env = make_vec_env(
+        ENV_ID,
+        n_envs=n_envs,
+        monitor_dir=LOG_DIR,
+        vec_env_cls=SubprocVecEnv if n_envs > 1 else DummyVecEnv,
+    )
     eval_env = DummyVecEnv([lambda: gym.make(ENV_ID, render_mode="rgb_array")])
 
     # -------------------------------------------------------------------------
     # 2. コールバック（チェックポイント保存 + 定期評価でベストモデル保存）
     # -------------------------------------------------------------------------
+    # save_freq/eval_freq は VecEnv では vec-step 単位で数えられるため、
+    # 総タイムステップ基準の頻度を保つよう n_envs で割る。
     checkpoint_callback = CheckpointCallback(
-        save_freq=1000,
+        save_freq=max(1000 // n_envs, 1),
         save_path=LOG_DIR,
         name_prefix="ddpg_model",
     )
@@ -62,7 +73,7 @@ def train(timesteps: int) -> None:
         eval_env,
         best_model_save_path=os.path.join(LOG_DIR, "best_model"),
         log_path=os.path.join(LOG_DIR, "results"),
-        eval_freq=500,
+        eval_freq=max(500 // n_envs, 1),
         deterministic=True,
         render=False,
     )
@@ -71,7 +82,7 @@ def train(timesteps: int) -> None:
     # -------------------------------------------------------------------------
     # 3. 行動ノイズ（探索用。平均0・標準偏差0.1の正規分布ノイズ）
     # -------------------------------------------------------------------------
-    n_actions = env.action_space.shape[-1]
+    n_actions = vec_env.action_space.shape[-1]
     action_noise = NormalActionNoise(
         mean=np.zeros(n_actions),
         sigma=0.1 * np.ones(n_actions),
@@ -80,16 +91,18 @@ def train(timesteps: int) -> None:
     # -------------------------------------------------------------------------
     # 4. DDPG モデルの構築
     # -------------------------------------------------------------------------
+    #    gradient_steps=-1: 収集ステップ数(=n_envs)ぶん勾配更新し、並列化しても
+    #    更新比 1:1 を維持する（n_envs=1 なら 1 回更新で従来と等価）。
     model = DDPG(
         policy="MlpPolicy",
-        env=env,
+        env=vec_env,
         action_noise=action_noise,
         gamma=0.99,
         learning_rate=3e-4,
         buffer_size=100_000,
         learning_starts=1_000,
         train_freq=(1, "step"),
-        gradient_steps=1,
+        gradient_steps=-1,
         tensorboard_log="tensorboard/",
         verbose=1,
     )
@@ -99,7 +112,7 @@ def train(timesteps: int) -> None:
     # -------------------------------------------------------------------------
     model.learn(total_timesteps=timesteps, callback=callbacks)
     model.save(FINAL_MODEL)
-    env.close()
+    vec_env.close()
     eval_env.close()
 
 
@@ -123,6 +136,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="DDPG を BipedalWalkerHardcore-v3 で学習・再生")
     parser.add_argument("--timesteps", type=int, default=2000, help="総学習ステップ数（既定: 2000）")
     parser.add_argument(
+        "--n-envs",
+        type=int,
+        default=4,
+        help="並列環境数（既定: 4 / 推奨上限: 論理コア数。1 で逐次=DummyVecEnv）",
+    )
+    parser.add_argument(
         "--mode",
         choices=["train", "play", "both"],
         default="both",
@@ -131,7 +150,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.mode in ("train", "both"):
-        train(args.timesteps)
+        train(args.timesteps, args.n_envs)
     if args.mode in ("play", "both"):
         play()
 

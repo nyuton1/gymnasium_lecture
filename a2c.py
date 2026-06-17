@@ -26,7 +26,7 @@ from stable_baselines3.common.callbacks import (
 )
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from gym_utils import record_agent_video
 
@@ -39,7 +39,7 @@ VIDEO_FOLDER = "a2c-bipedalwalkerhardcore_videos_practice"  # 再生動画の保
 FINAL_MODEL = "a2c_bipedalwalkerhardcore"                 # 学習後の最終モデル保存名(.zip)
 
 
-def train(timesteps: int) -> None:
+def train(timesteps: int, n_envs: int) -> None:
     """A2C モデルを学習し、チェックポイント・ベストモデル・最終モデルを保存する。"""
     # -------------------------------------------------------------------------
     # 1. ログディレクトリの準備
@@ -47,17 +47,27 @@ def train(timesteps: int) -> None:
     os.makedirs(LOG_DIR, exist_ok=True)
 
     # -------------------------------------------------------------------------
-    # 2. ベクトル化環境の作成
-    #    複数環境を並列実行して学習効率を上げる。make_vec_env が内部で Monitor を
-    #    適用し、各エピソードの統計を monitor_dir に記録する。
+    # 2. ベクトル化環境の作成（SubprocVecEnv でサブプロセス並列）
+    #    make_vec_env の既定は DummyVecEnv（逐次）なので、真の並列化には
+    #    vec_env_cls=SubprocVecEnv を明示する。n_envs=1 のときは subprocess
+    #    起動コストを避けて DummyVecEnv にフォールバック。
+    #    make_vec_env が内部で Monitor を適用し、統計を monitor_dir に記録する。
+    #    A2C は実効バッチ = n_steps × n_envs で、n_envs を増やすほど更新が安定する。
     # -------------------------------------------------------------------------
-    vec_env = make_vec_env(ENV_ID, n_envs=4, monitor_dir=LOG_DIR)
+    vec_env = make_vec_env(
+        ENV_ID,
+        n_envs=n_envs,
+        monitor_dir=LOG_DIR,
+        vec_env_cls=SubprocVecEnv if n_envs > 1 else DummyVecEnv,
+    )
 
     # -------------------------------------------------------------------------
     # 3. チェックポイントコールバック（一定ステップごとにモデルを保存）
     # -------------------------------------------------------------------------
+    # save_freq は VecEnv では vec-step 単位で数えられるため、
+    # 総タイムステップ基準の頻度を保つよう n_envs で割る。
     checkpoint_callback = CheckpointCallback(
-        save_freq=1000,
+        save_freq=max(1000 // n_envs, 1),
         save_path=LOG_DIR,
         name_prefix="a2c_model",
     )
@@ -74,7 +84,7 @@ def train(timesteps: int) -> None:
         eval_env,
         best_model_save_path=os.path.join(LOG_DIR, "best_model"),
         log_path=os.path.join(LOG_DIR, "results"),
-        eval_freq=500,
+        eval_freq=max(500 // n_envs, 1),
         deterministic=True,
         render=False,
     )
@@ -126,6 +136,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="A2C を BipedalWalkerHardcore-v3 で学習・再生")
     parser.add_argument("--timesteps", type=int, default=2000, help="総学習ステップ数（既定: 2000）")
     parser.add_argument(
+        "--n-envs",
+        type=int,
+        default=4,
+        help="並列環境数（既定: 4 / 推奨上限: 論理コア数。1 で逐次=DummyVecEnv）",
+    )
+    parser.add_argument(
         "--mode",
         choices=["train", "play", "both"],
         default="both",
@@ -134,7 +150,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.mode in ("train", "both"):
-        train(args.timesteps)
+        train(args.timesteps, args.n_envs)
     if args.mode in ("play", "both"):
         play()
 
