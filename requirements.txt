@@ -1,0 +1,32 @@
+# =============================================================================
+# 深層強化学習（StableBaselines3 + Gymnasium）ローカル実行用 依存パッケージ
+# =============================================================================
+# このファイルは Colab ノートブックの `!pip install ...` を置き換えるものです。
+#
+# インストール方法（推奨）:
+#   bash setup.sh                       # venv 作成 + 依存一括インストール
+# もしくは手動で:
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   pip install --upgrade pip
+#   pip install swig                    # ← box2d-py のビルドに先立って必要
+#   pip install -r requirements.txt
+#
+# 注意:
+#   - `gymnasium[box2d]` は内部で `box2d-py` を C/C++ からビルドするため、
+#     事前に `swig` が PATH 上に存在している必要があります（setup.sh が対応）。
+#   - macOS(arm64) では torch は CPU/MPS 版が自動選択されます（GPU 不要）。
+#   - 動画書き出し（gymnasium の RecordVideo）には ffmpeg が必要です。
+#     未導入の場合は `brew install ffmpeg` を実行してください。
+# =============================================================================
+
+# --- 強化学習フレームワーク -------------------------------------------------
+gymnasium[box2d]==1.0.0      # 環境 API（BipedalWalker-v3 を含む）+ Box2D 物理エンジン
+stable-baselines3==2.4.0     # A2C / DDPG / TD3 / SAC の実装
+
+# --- ディープラーニング基盤 -------------------------------------------------
+torch>=2.2.0                 # stable-baselines3 のバックエンド（macOS は CPU/MPS）
+
+# --- 可視化・録画 -----------------------------------------------------------
+tensorboard>=2.16.0          # 学習過程の可視化（tensorboard_log 出力先）
+moviepy==1.0.3               # RecordVideo の mp4 書き出しに使用
