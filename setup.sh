@@ -77,14 +77,14 @@ echo "==> requirements.txt をインストール"
 pip install -r requirements.txt
 
 # -----------------------------------------------------------------------------
-# 6. 動作確認: BipedalWalker-v3 が生成できるか
+# 6. 動作確認: BipedalWalkerHardcore-v3 が生成できるか
 # -----------------------------------------------------------------------------
-echo "==> 環境生成の確認 (BipedalWalker-v3)"
+echo "==> 環境生成の確認 (BipedalWalkerHardcore-v3)"
 python - <<'PY'
 import gymnasium as gym
-env = gym.make("BipedalWalker-v3", render_mode="rgb_array")
+env = gym.make("BipedalWalkerHardcore-v3", render_mode="rgb_array")
 obs, info = env.reset(seed=0)
-print("OK: BipedalWalker-v3 を生成できました。観測次元 =", obs.shape)
+print("OK: BipedalWalkerHardcore-v3 を生成できました。観測次元 =", obs.shape)
 env.close()
 PY
 

@@ -4,7 +4,7 @@ __pycache__/
 *.pyc
 
 # 学習・実行で生成される成果物
-*_logs_bipedalwalker/
+*_logs_bipedalwalker*/
 *_videos_practice/
 tensorboard/
 *.zip

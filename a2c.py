@@ -1,4 +1,4 @@
-"""A2C (Advantage Actor-Critic) を BipedalWalker-v3 で学習・再生するスクリプト。
+"""A2C (Advantage Actor-Critic) を BipedalWalkerHardcore-v3 で学習・再生するスクリプト。
 
 A3C の同期版にあたる A2C は、複数の環境を並列に動かして経験をまとめて収集し、
 アクター（方策）とクリティック（価値関数）を一括更新するオンポリシー手法です。
@@ -33,10 +33,10 @@ from gym_utils import record_agent_video
 # =============================================================================
 # 設定（元 Colab ノートブックの A2C セルから移植）
 # =============================================================================
-ENV_ID = "BipedalWalker-v3"                       # 使用する Gym 環境
-LOG_DIR = "./a2c_logs_bipedalwalker/"             # ログ・モデルの保存先
-VIDEO_FOLDER = "a2c-bipedalwalker_videos_practice"  # 再生動画の保存先
-FINAL_MODEL = "a2c_bipedalwalker"                 # 学習後の最終モデル保存名(.zip)
+ENV_ID = "BipedalWalkerHardcore-v3"                       # 使用する Gym 環境
+LOG_DIR = "./a2c_logs_bipedalwalkerhardcore/"             # ログ・モデルの保存先
+VIDEO_FOLDER = "a2c-bipedalwalkerhardcore_videos_practice"  # 再生動画の保存先
+FINAL_MODEL = "a2c_bipedalwalkerhardcore"                 # 学習後の最終モデル保存名(.zip)
 
 
 def train(timesteps: int) -> None:
@@ -123,7 +123,7 @@ def play() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="A2C を BipedalWalker-v3 で学習・再生")
+    parser = argparse.ArgumentParser(description="A2C を BipedalWalkerHardcore-v3 で学習・再生")
     parser.add_argument("--timesteps", type=int, default=2000, help="総学習ステップ数（既定: 2000）")
     parser.add_argument(
         "--mode",

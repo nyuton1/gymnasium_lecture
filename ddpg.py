@@ -1,4 +1,4 @@
-"""DDPG (Deep Deterministic Policy Gradient) を BipedalWalker-v3 で学習・再生するスクリプト。
+"""DDPG (Deep Deterministic Policy Gradient) を BipedalWalkerHardcore-v3 で学習・再生するスクリプト。
 
 DDPG は連続行動空間向けのオフポリシー型アクター–クリティック手法です。
 アクターが状態から決定論的な行動を出力し、それに行動ノイズを加えて探索します。
@@ -34,10 +34,10 @@ from gym_utils import record_agent_video
 # =============================================================================
 # 設定（元 Colab ノートブックの DDPG セルから移植）
 # =============================================================================
-ENV_ID = "BipedalWalker-v3"
-LOG_DIR = "./ddpg_logs_bipedalwalker/"
-VIDEO_FOLDER = "ddpg_bipedalwalker_videos_practice"
-FINAL_MODEL = "ddpg_bipedalwalker"
+ENV_ID = "BipedalWalkerHardcore-v3"
+LOG_DIR = "./ddpg_logs_bipedalwalkerhardcore/"
+VIDEO_FOLDER = "ddpg_bipedalwalkerhardcore_videos_practice"
+FINAL_MODEL = "ddpg_bipedalwalkerhardcore"
 
 
 def train(timesteps: int) -> None:
@@ -120,7 +120,7 @@ def play() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="DDPG を BipedalWalker-v3 で学習・再生")
+    parser = argparse.ArgumentParser(description="DDPG を BipedalWalkerHardcore-v3 で学習・再生")
     parser.add_argument("--timesteps", type=int, default=2000, help="総学習ステップ数（既定: 2000）")
     parser.add_argument(
         "--mode",

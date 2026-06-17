@@ -1,4 +1,4 @@
-"""TD3 (Twin Delayed DDPG) を BipedalWalker-v3 で学習・再生するスクリプト。
+"""TD3 (Twin Delayed DDPG) を BipedalWalkerHardcore-v3 で学習・再生するスクリプト。
 
 TD3 は DDPG の改良版で、Q 値の過大推定を抑えるために
 (1) 2 つのクリティックの小さい方をターゲットに使う、
@@ -35,10 +35,10 @@ from gym_utils import record_agent_video
 # =============================================================================
 # 設定（元 Colab ノートブックの TD3 セルから移植）
 # =============================================================================
-ENV_ID = "BipedalWalker-v3"
-LOG_DIR = "./td3_logs_bipedalwalker/"
-VIDEO_FOLDER = "td3_bipedalwalker_videos_practice"
-FINAL_MODEL = "td3_bipedalwalker"
+ENV_ID = "BipedalWalkerHardcore-v3"
+LOG_DIR = "./td3_logs_bipedalwalkerhardcore/"
+VIDEO_FOLDER = "td3_bipedalwalkerhardcore_videos_practice"
+FINAL_MODEL = "td3_bipedalwalkerhardcore"
 
 
 def train(timesteps: int) -> None:
@@ -122,7 +122,7 @@ def play() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="TD3 を BipedalWalker-v3 で学習・再生")
+    parser = argparse.ArgumentParser(description="TD3 を BipedalWalkerHardcore-v3 で学習・再生")
     parser.add_argument("--timesteps", type=int, default=2000, help="総学習ステップ数（既定: 2000）")
     parser.add_argument(
         "--mode",

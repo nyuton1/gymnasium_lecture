@@ -1,4 +1,4 @@
-"""SAC (Soft Actor-Critic) を BipedalWalker-v3 で学習・再生するスクリプト。
+"""SAC (Soft Actor-Critic) を BipedalWalkerHardcore-v3 で学習・再生するスクリプト。
 
 SAC は「報酬の最大化」に加えて「方策のエントロピー最大化」を目的に組み込んだ
 オフポリシー型アクター–クリティック手法です。確率的な方策とエントロピー項により
@@ -38,10 +38,10 @@ from gym_utils import record_agent_video
 # =============================================================================
 # 設定（元 Colab ノートブックの SAC セルから移植）
 # =============================================================================
-ENV_ID = "BipedalWalker-v3"
-LOG_DIR = "./sac_logs_bipedalwalker/"
-VIDEO_FOLDER = "sac_bipedalwalker_videos_practice"
-FINAL_MODEL = "sac_bipedalwalker"
+ENV_ID = "BipedalWalkerHardcore-v3"
+LOG_DIR = "./sac_logs_bipedalwalkerhardcore/"
+VIDEO_FOLDER = "sac_bipedalwalkerhardcore_videos_practice"
+FINAL_MODEL = "sac_bipedalwalkerhardcore"
 
 
 def train(timesteps: int) -> None:
@@ -117,7 +117,7 @@ def play() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SAC を BipedalWalker-v3 で学習・再生")
+    parser = argparse.ArgumentParser(description="SAC を BipedalWalkerHardcore-v3 で学習・再生")
     parser.add_argument("--timesteps", type=int, default=2000, help="総学習ステップ数（既定: 2000）")
     parser.add_argument(
         "--mode",
