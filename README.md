@@ -23,6 +23,20 @@ StableBaselines3 を用いて、4 つの深層強化学習アルゴリズム
 
 ---
 
+## クイックスタート
+
+```bash
+bash setup.sh                      # 初回セットアップ（venv作成 + 依存インストール）
+source .venv/bin/activate          # 仮想環境を有効化
+python a2c.py                      # A2C を学習(2000step) → 録画 → 再生
+python sac.py --timesteps 50000    # SAC をしっかり学習させる場合
+```
+
+> `setup.sh` は初回のみ実行すればOKです。2回目以降は `source .venv/bin/activate` から始めてください。
+> 各コマンドの詳細は下の[セットアップ](#セットアップ)・[使い方](#使い方)を参照してください。
+
+---
+
 ## セットアップ
 
 ### 推奨: ワンショットスクリプト
