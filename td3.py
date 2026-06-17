@@ -18,6 +18,8 @@ TD3 は DDPG の改良版で、Q 値の過大推定を抑えるために
 
 import argparse
 import os
+import time
+from datetime import timedelta
 
 import gymnasium as gym
 import numpy as np
@@ -100,7 +102,7 @@ def train(timesteps: int, n_envs: int) -> None:
         action_noise=action_noise,
         gamma=0.99,
         learning_rate=3e-4,
-        buffer_size=100_000,
+        buffer_size=1_000_000,
         learning_starts=1_000,
         train_freq=(1, "step"),
         gradient_steps=-1,
@@ -151,10 +153,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    start_time = time.perf_counter()
     if args.mode in ("train", "both"):
         train(args.timesteps, args.n_envs)
     if args.mode in ("play", "both"):
         play()
+    elapsed = time.perf_counter() - start_time
+    print(f"経過時間: {timedelta(seconds=round(elapsed))}（{elapsed:.1f} 秒）")
 
 
 if __name__ == "__main__":
