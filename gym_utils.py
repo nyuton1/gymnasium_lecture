@@ -3,7 +3,7 @@
 このモジュールは、元の Colab ノートブックが Google Drive から取得していた
 `gym_utils.py`（`display_video` 関数）を **ローカル実行向けに再作成** したものです。
 
-主な公開関数:
+主な公開関数・クラス:
     display_video(env, video_folder)
         指定フォルダに保存された動画(mp4)を表示する。
         - Jupyter / IPython カーネル上では HTML5 <video> として埋め込み表示。
@@ -14,6 +14,10 @@
         学習済みエージェントを 1 エピソード動かして動画を録画し、
         最後に display_video で表示する。
         （各アルゴリズムスクリプトで共通だった「再生ループ」を集約したもの）
+
+    FallPenaltyWrapper(env, fall_penalty=-40.0)
+        転倒時の報酬 -100 を小さい値に置き換える報酬整形ラッパー。
+        各学習スクリプトが make_vec_env(wrapper_class=...) で学習用 env にのみ適用する。
 
 元ノートブックとの互換性のため、`display_video(env, video_folder)` の
 シグネチャ（第1引数に環境/ラッパー、第2引数に動画フォルダ）を維持しています。
@@ -30,6 +34,32 @@ import sys
 from typing import Optional
 
 import gymnasium as gym
+
+
+class FallPenaltyWrapper(gym.Wrapper):
+    """転倒時の報酬 -100 を緩和する報酬整形(reward shaping)ラッパー。
+
+    BipedalWalker(Hardcore) は胴体が地面に触れて転倒すると、その 1 ステップで
+    報酬がちょうど -100 に置き換えられてエピソードが終了する（gymnasium の
+    ``bipedal_walker.py``: ``if self.game_over or pos[0] < 0: reward = -100``）。
+    この -100 は前進報酬（1 エピソード累計でも +300 程度）に比べて一度に入る罰が
+    大きすぎ、「動かない方がマシ」とエージェントが萎縮して学習が進みにくくなる。
+
+    そこで転倒ステップの報酬(-100)を、より小さい ``fall_penalty`` に置き換える。
+    -100 はこの転倒時にしか発生しないため ``reward <= -100`` で転倒を判定でき、
+    前進報酬やトルクコストには一切手を加えない。学習用 env にのみ適用し、
+    評価・再生では素の報酬を使う（真の性能で best_model を選ぶため）。
+    """
+
+    def __init__(self, env, fall_penalty: float = -40.0):
+        super().__init__(env)
+        self.fall_penalty = fall_penalty
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        if reward <= -100:  # 転倒（報酬がちょうど -100）のときだけ緩和
+            reward = self.fall_penalty
+        return obs, reward, terminated, truncated, info
 
 
 def _latest_video(video_folder: str) -> Optional[str]:

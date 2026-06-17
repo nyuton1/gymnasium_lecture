@@ -91,12 +91,16 @@ python sac.py      # SAC
 | オプション | 説明 | 既定値 |
 |---|---|---|
 | `--timesteps N` | 総学習ステップ数 | `2000`（動作確認用） |
+| `--n-envs N` | 並列環境数（`SubprocVecEnv`。`1` で逐次=`DummyVecEnv`） | `4` |
+| `--fall-penalty F` | 転倒時の報酬(`-100`)を緩和する置換値。`-100` で緩和なし（元の挙動） | `-40.0` |
 | `--mode {train,play,both}` | `train`=学習のみ / `play`=保存済みモデルを再生のみ / `both`=学習して再生 | `both` |
 
 ```bash
 python a2c.py --timesteps 50000      # しっかり学習させる
 python a2c.py --mode train           # 学習だけ行う（録画・再生なし）
 python a2c.py --mode play            # 学習済みモデルを再生するだけ
+python a2c.py --fall-penalty -40     # 転倒ペナルティを -40 に緩和（既定）
+python a2c.py --fall-penalty -100    # 緩和なし（元の挙動に戻す）
 ```
 
 ---
@@ -165,6 +169,13 @@ tensorboard --logdir tensorboard/
 - **学習ステップ数と時間**: 既定の 2000 ステップは「最後までエラーなく動くか」の
   動作確認用です。意味のある方策を得るには数万〜数十万ステップが必要で、
   macOS の CPU/MPS 実行では時間がかかります。
+
+- **転倒ペナルティの緩和（reward shaping）**: 既定で転倒時の報酬 `-100` を
+  `--fall-penalty`（既定 `-40`）に置き換えて学習を安定化します（`-100` は転倒時のみ
+  発生）。この置換は**学習用環境にのみ**適用され、評価・再生は素の報酬を使います。
+  また置換は Monitor の外側で行われるため、`rollout/ep_rew_mean` も `eval/mean_reward` も
+  転倒 `-100` 込みの真の報酬で表示されます（緩和は勾配にのみ効きます）。元の挙動に
+  戻すには `--fall-penalty -100` を指定してください。
 
 - **`box2d-py` のビルドに失敗する**: `swig` が見つからないことが原因です。
   `brew install swig`（macOS）/ `sudo apt install swig`（Linux）の後に

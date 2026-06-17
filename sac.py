@@ -36,7 +36,7 @@ from stable_baselines3.common.callbacks import (
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-from gym_utils import record_agent_video
+from gym_utils import FallPenaltyWrapper, record_agent_video
 
 # =============================================================================
 # 設定（元 Colab ノートブックの SAC セルから移植）
@@ -47,7 +47,7 @@ VIDEO_FOLDER = "sac_bipedalwalkerhardcore_videos_practice"
 FINAL_MODEL = "sac_bipedalwalkerhardcore"
 
 
-def train(timesteps: int, n_envs: int) -> None:
+def train(timesteps: int, n_envs: int, fall_penalty: float) -> None:
     """SAC モデルを学習し、チェックポイント・ベストモデル・最終モデルを保存する。"""
     os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -62,6 +62,12 @@ def train(timesteps: int, n_envs: int) -> None:
         n_envs=n_envs,
         monitor_dir=LOG_DIR,
         vec_env_cls=SubprocVecEnv if n_envs > 1 else DummyVecEnv,
+        # 転倒ペナルティ(-100)を緩和する報酬整形を学習用 env にのみ適用する。
+        # wrapper は Monitor の外側に入るため、Monitor が記録する ep_rew_mean は
+        # 素の報酬（-100 込み）のまま。緩和後の報酬は勾配にのみ効く。
+        # fall_penalty == -100 のときはラッパーを付けず元の挙動にする。
+        wrapper_class=FallPenaltyWrapper if fall_penalty != -100 else None,
+        wrapper_kwargs={"fall_penalty": fall_penalty},
     )
     eval_env = DummyVecEnv([lambda: gym.make(ENV_ID, render_mode="rgb_array")])
 
@@ -141,6 +147,12 @@ def main() -> None:
         help="並列環境数（既定: 4 / 推奨上限: 論理コア数。1 で逐次=DummyVecEnv）",
     )
     parser.add_argument(
+        "--fall-penalty",
+        type=float,
+        default=-40.0,
+        help="転倒時の報酬(-100)を緩和する置換値（既定: -40.0 / -100 で緩和なし=元の挙動）",
+    )
+    parser.add_argument(
         "--mode",
         choices=["train", "play", "both"],
         default="both",
@@ -150,7 +162,7 @@ def main() -> None:
 
     start_time = time.perf_counter()
     if args.mode in ("train", "both"):
-        train(args.timesteps, args.n_envs)
+        train(args.timesteps, args.n_envs, args.fall_penalty)
     if args.mode in ("play", "both"):
         play()
     elapsed = time.perf_counter() - start_time
