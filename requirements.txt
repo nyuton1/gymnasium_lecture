@@ -22,7 +22,8 @@
 
 # --- 強化学習フレームワーク -------------------------------------------------
 gymnasium[box2d]==1.0.0      # 環境 API（BipedalWalker-v3 を含む）+ Box2D 物理エンジン
-stable-baselines3==2.4.0     # A2C / DDPG / TD3 / SAC の実装
+stable-baselines3==2.4.0     # A2C / DDPG / TD3 / SAC / PPO の実装
+sb3-contrib==2.4.0           # TRPO / RecurrentPPO の実装（stable-baselines3 と同バージョン）
 
 # --- ディープラーニング基盤 -------------------------------------------------
 torch>=2.2.0                 # stable-baselines3 のバックエンド（macOS は CPU/MPS）

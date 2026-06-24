@@ -19,6 +19,10 @@
         転倒時の報酬 -100 を小さい値に置き換える報酬整形ラッパー。
         各学習スクリプトが make_vec_env(wrapper_class=...) で学習用 env にのみ適用する。
 
+    RecordBestVideoCallback(env_id, video_folder, min_interval_steps=0)
+        EvalCallback の callback_on_new_best として使い、ベストモデル更新時に
+        その時点のモデルから進捗動画を録画して履歴に残す SB3 コールバック。
+
 元ノートブックとの互換性のため、`display_video(env, video_folder)` の
 シグネチャ（第1引数に環境/ラッパー、第2引数に動画フォルダ）を維持しています。
 第1引数は本実装では使用しませんが、互換性のために受け取ります。
@@ -34,6 +38,8 @@ import sys
 from typing import Optional
 
 import gymnasium as gym
+import numpy as np
+from stable_baselines3.common.callbacks import BaseCallback
 
 
 class FallPenaltyWrapper(gym.Wrapper):
@@ -103,12 +109,14 @@ def _open_with_os_player(video_path: str) -> None:
         print(f"(動画の自動再生に失敗しました: {exc})")
 
 
-def display_video(env, video_folder: str) -> Optional[object]:
+def display_video(env, video_folder: str, open_player: bool = True) -> Optional[object]:
     """保存済みの動画を表示する。
 
     Args:
         env: 互換性のために受け取る環境/ラッパー（本実装では未使用）。
         video_folder: RecordVideo が動画を書き出したフォルダ。
+        open_player: 通常実行時に OS 既定プレーヤで動画を開くか（既定 True）。
+            学習中の進捗録画など、毎回プレーヤを開きたくない場合に False を渡す。
 
     Returns:
         Jupyter 上では IPython の表示オブジェクト（HTML）。それ以外は None。
@@ -140,7 +148,8 @@ def display_video(env, video_folder: str) -> Optional[object]:
     print(f"[display_video] 動画を保存しました: {os.path.abspath(video_path)}")
     # 環境変数 GYM_UTILS_NO_OPEN を設定すると自動再生を抑止できる
     # （ヘッドレス環境や、まとめて実行してプレーヤを開きたくない場合に便利）。
-    if not os.environ.get("GYM_UTILS_NO_OPEN"):
+    # 呼び出し側が open_player=False を渡した場合も同様に抑止する。
+    if open_player and not os.environ.get("GYM_UTILS_NO_OPEN"):
         _open_with_os_player(video_path)
     return None
 
@@ -150,6 +159,9 @@ def record_agent_video(
     env_id: str,
     video_folder: str,
     deterministic: bool = True,
+    name_prefix: str = "rl-video",
+    open_player: bool = True,
+    recurrent: bool = False,
 ):
     """学習済みエージェントを 1 エピソード実行して動画に録画し、表示する。
 
@@ -162,19 +174,41 @@ def record_agent_video(
         env_id: Gym 環境 ID（例: "BipedalWalker-v3"）。
         video_folder: 動画の保存先フォルダ。
         deterministic: True なら確定的な行動を選択（評価向き）。
+        name_prefix: RecordVideo の出力ファイル名 prefix（既定 "rl-video"）。
+            step 入りの prefix を渡すと同じフォルダでも上書きせず履歴を残せる。
+        open_player: 通常実行時に OS 既定プレーヤで動画を開くか（既定 True）。
+        recurrent: RecurrentPPO のような再帰方策（LSTM）かどうか（既定 False）。
+            True のとき、predict に LSTM 隠れ状態(state)とエピソード開始フラグ
+            (episode_start)を渡し、ステップ間で隠れ状態を引き継ぐ。これを渡さないと
+            毎ステップ隠れ状態がゼロにリセットされ、再帰方策が正しく動かない。
+            非再帰方策（A2C/PPO/TRPO/DDPG/TD3/SAC）では False のままでよい。
     """
     # rgb_array モードで環境を作り、RecordVideo でラップして録画する
     env = gym.make(env_id, render_mode="rgb_array")
     env = gym.wrappers.RecordVideo(
         env,
         video_folder=video_folder,
+        name_prefix=name_prefix,
         disable_logger=True,
     )
 
     obs, info = env.reset()
+    # 再帰方策用の LSTM 隠れ状態。最初のステップはエピソード開始として渡す。
+    lstm_states = None
+    episode_starts = np.ones((1,), dtype=bool)
     while True:
-        action, _states = agent.predict(obs, deterministic=deterministic)
+        if recurrent:
+            # LSTM 隠れ状態を引き継ぎながら推論する（RecurrentPPO 等）。
+            action, lstm_states = agent.predict(
+                obs,
+                state=lstm_states,
+                episode_start=episode_starts,
+                deterministic=deterministic,
+            )
+        else:
+            action, _states = agent.predict(obs, deterministic=deterministic)
         obs, reward, done, truncated, info = env.step(action)
+        episode_starts = np.array([done or truncated])
         if done or truncated:
             # エピソード終了でループを抜ける。
             # （元ノートブックはここで reset() を呼んでいたが、それは空の2本目の
@@ -182,4 +216,69 @@ def record_agent_video(
             break
 
     env.close()
-    return display_video(env, video_folder)
+    return display_video(env, video_folder, open_player=open_player)
+
+
+class RecordBestVideoCallback(BaseCallback):
+    """ベストモデル更新時に進捗動画を録画する SB3 コールバック。
+
+    ``EvalCallback`` の ``callback_on_new_best`` として渡して使う。EvalCallback が
+    新記録で best_model を保存した**直後**に呼ばれ、その時点の ``self.model``
+    （＝今ベストになった現行モデル）から 1 エピソードを録画して、学習の進捗を
+    履歴として残す。best_model.zip を再ロードしないので、保存との書き込み競合を
+    気にする必要がない（SB3 2.4.0 で確認: EvalCallback._init_callback が
+    ``callback_on_new_best.init_callback(self.model)`` を呼ぶため self.model 参照可）。
+
+    学習の早い段階では best が頻繁に更新されるため、``min_interval_steps`` で
+    録画の最低 step 間隔を設けて間引ける（``0`` なら best 更新ごとに毎回録画）。
+    動画は ``best-step<総step数>-episode-0.mp4`` のように step 入りの名前で
+    保存され、上書きされずに溜まっていく。録画時はプレーヤを開かない。
+
+    Args:
+        env_id: 録画に使う Gym 環境 ID。
+        video_folder: 進捗動画の保存先フォルダ。
+        min_interval_steps: 録画の最低 step 間隔（既定 0 = best 更新ごとに毎回）。
+        deterministic: 録画時に確定的行動を取るか（評価向きは True）。
+        verbose: 1 で録画ログを出力。
+    """
+
+    def __init__(
+        self,
+        env_id: str,
+        video_folder: str,
+        min_interval_steps: int = 0,
+        deterministic: bool = True,
+        verbose: int = 0,
+    ):
+        super().__init__(verbose)
+        self.env_id = env_id
+        self.video_folder = video_folder
+        self.min_interval_steps = min_interval_steps
+        self.deterministic = deterministic
+        self._last_record_step: Optional[int] = None
+
+    def _on_step(self) -> bool:
+        # callback_on_new_best として呼ばれる時点で best_model は保存済み、
+        # self.model は今ベストになった現行モデル、self.num_timesteps は最新。
+        if (
+            self._last_record_step is not None
+            and self.num_timesteps - self._last_record_step < self.min_interval_steps
+        ):
+            return True  # スロットル中（早期の頻繁な best 更新を間引く）
+
+        try:
+            os.makedirs(self.video_folder, exist_ok=True)
+            record_agent_video(
+                self.model,
+                self.env_id,
+                self.video_folder,
+                deterministic=self.deterministic,
+                name_prefix=f"best-step{self.num_timesteps:08d}",
+                open_player=False,  # 学習中はプレーヤを開かない
+            )
+            self._last_record_step = self.num_timesteps
+            if self.verbose:
+                print(f"[progress-video] step={self.num_timesteps} の進捗動画を保存しました")
+        except Exception as exc:  # 録画失敗で長時間学習を止めない
+            print(f"[progress-video] 録画に失敗しました（学習は継続）: {exc}")
+        return True

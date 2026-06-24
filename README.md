@@ -1,12 +1,14 @@
 # 様々な深層強化学習アルゴリズム（ローカル実行版）
 
-StableBaselines3 を用いて、4 つの深層強化学習アルゴリズム
-**A2C / DDPG / TD3 / SAC** を Gymnasium の `BipedalWalkerHardcore-v3` 環境で
-「学習 → ベストモデル保存 → 録画 → 再生」するサンプル集です。
+StableBaselines3 を用いて、7 つの深層強化学習アルゴリズム
+**A2C / DDPG / TD3 / SAC / TRPO / PPO / RecurrentPPO** を Gymnasium の
+`BipedalWalkerHardcore-v3` 環境で「学習 → ベストモデル保存 → 録画 → 再生」する
+サンプル集です。
 
-元は Google Colab 用ノートブック
-（`10_DeepReinforcementLearning_and_StableBaselines3_01_fixed_ipynb_のコピー.ipynb`）
-でしたが、Colab 固有の処理を取り除き、**ローカル環境で動く Python スクリプト**に移植しています。
+元は Google Colab 用ノートブック 2 本
+（`10_..._01_fixed_ipynb_のコピー.ipynb` = A2C/DDPG/TD3/SAC、
+`11_..._02_fixed_ipynb_のコピー.ipynb` = TRPO/PPO/RecurrentPPO）でしたが、
+Colab 固有の処理を取り除き、**ローカル環境で動く Python スクリプト**に移植しています。
 
 > 使用しているのは OpenAI の旧 `gym` ではなく、その後継である
 > **Gymnasium**（Farama Foundation, v1.0.0）です。`import gymnasium as gym`、
@@ -80,11 +82,21 @@ pip install -r requirements.txt
 ```bash
 source .venv/bin/activate
 
-python a2c.py      # A2C  を学習(2000step) → ベストモデルを録画・再生
-python ddpg.py     # DDPG
-python td3.py      # TD3
-python sac.py      # SAC
+# オフポリシー（リプレイバッファあり）
+python ddpg.py            # DDPG
+python td3.py             # TD3
+python sac.py             # SAC
+
+# オンポリシー（リプレイバッファなし）
+python a2c.py             # A2C  を学習(2000step) → ベストモデルを録画・再生
+python trpo.py            # TRPO        （sb3_contrib）
+python ppo.py             # PPO
+python recurrent_ppo.py   # RecurrentPPO（sb3_contrib、LSTM 方策）
 ```
+
+> **TRPO / RecurrentPPO は拡張パッケージ `sb3_contrib` を使います**（`requirements.txt` に同梱済み）。
+> PPO は `stable_baselines3` 本体に含まれます。RecurrentPPO は LSTM を使うため、再生時に
+> ステップ間で隠れ状態を引き継ぎます（`gym_utils.record_agent_video(..., recurrent=True)`）。
 
 ### 共通オプション
 
@@ -115,7 +127,7 @@ python a2c.py --fall-penalty -100    # 緩和なし（元の挙動に戻す）
 | `<algo>_bipedalwalkerhardcore_videos_practice/rl-video-episode-0.mp4` | 再生時に録画した動画 |
 | `tensorboard/` | TensorBoard 用ログ（全アルゴリズム共通） |
 
-`<algo>` は `a2c` / `ddpg` / `td3` / `sac`。
+`<algo>` は `a2c` / `ddpg` / `td3` / `sac` / `trpo` / `ppo` / `recurrent_ppo`。
 
 - **再生の挙動**: スクリプト実行時、`gym_utils.display_video` が録画した mp4 の
   パスを表示し、OS 既定のプレーヤで自動再生します。
@@ -145,10 +157,13 @@ tensorboard --logdir tensorboard/
 ├── requirements.txt   # 依存パッケージ（バージョン固定）
 ├── setup.sh           # venv 作成 + 依存インストール
 ├── gym_utils.py       # display_video() / record_agent_video()（録画・再生ユーティリティ）
-├── a2c.py             # A2C
-├── ddpg.py            # DDPG
-├── td3.py             # TD3
-└── sac.py             # SAC
+├── a2c.py             # A2C          （オンポリシー）
+├── ddpg.py            # DDPG         （オフポリシー）
+├── td3.py             # TD3          （オフポリシー）
+├── sac.py             # SAC          （オフポリシー）
+├── trpo.py            # TRPO         （オンポリシー / sb3_contrib）
+├── ppo.py             # PPO          （オンポリシー）
+└── recurrent_ppo.py   # RecurrentPPO （オンポリシー / sb3_contrib・LSTM）
 ```
 
 ---
@@ -201,5 +216,6 @@ tensorboard --logdir tensorboard/
 | `!apt install xvfb` / `python-pygame` | 不要なため削除（macOS はヘッドレス描画可） |
 | `!gdown ...`（Drive から `gym_utils.py` 取得） | `gym_utils.py` をローカル用に再作成 |
 | `%load_ext tensorboard` / `%tensorboard` | `tensorboard --logdir tensorboard/` を別ターミナルで実行 |
-| `!pip install ...` | `requirements.txt` + `setup.sh` に集約 |
+| `!pip install ...` | `requirements.txt` + `setup.sh` に集約（`sb3_contrib` も追加） |
 | 1 ノートブックに全アルゴリズム | アルゴリズムごとの Python スクリプトに分割 |
+| `BipedalWalker-v3`（11_ ノートブック） | 既存スクリプトに合わせ `BipedalWalkerHardcore-v3` に統一 |
