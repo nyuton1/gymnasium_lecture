@@ -19,6 +19,7 @@ import argparse
 import os
 import time
 from datetime import timedelta
+from typing import Optional
 
 import gymnasium as gym
 from sb3_contrib import TRPO
@@ -31,23 +32,37 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-from gym_utils import FallPenaltyWrapper, record_agent_video
+from gym_utils import (
+    FallPenaltyWrapper,
+    new_run_dir,
+    record_agent_video,
+    resolve_model_path,
+    resolve_run_dir,
+)
 
 # =============================================================================
 # 設定（元 Colab ノートブック 11_ の TRPO セルから移植）
 # =============================================================================
 ENV_ID = "BipedalWalkerHardcore-v3"                        # 使用する Gym 環境
-LOG_DIR = "./trpo_logs_bipedalwalkerhardcore/"             # ログ・モデルの保存先
-VIDEO_FOLDER = "trpo-bipedalwalkerhardcore_videos_practice"  # 再生動画の保存先
-FINAL_MODEL = "trpo_bipedalwalkerhardcore"                 # 学習後の最終モデル保存名(.zip)
+# 1 回の学習に関わる全成果物を runs/<ALGO>/<run_id>/ に自己完結させる。
+ALGO = "trpo"
 
 
-def train(timesteps: int, n_envs: int, fall_penalty: float) -> None:
-    """TRPO モデルを学習し、チェックポイント・ベストモデル・最終モデルを保存する。"""
+def train(timesteps: int, n_envs: int, fall_penalty: float) -> str:
+    """TRPO モデルを学習し、チェックポイント・ベストモデル・最終モデルを保存する。
+
+    出力はタイムスタンプ別 run ディレクトリ runs/<ALGO>/<run_id>/ に隔離する。
+    戻り値はこの run ディレクトリのパス（main() が play() に引き継ぐ）。
+    """
     # -------------------------------------------------------------------------
-    # 1. ログディレクトリの準備
+    # 1. この学習専用の run ディレクトリ（タイムスタンプ）を作る
     # -------------------------------------------------------------------------
-    os.makedirs(LOG_DIR, exist_ok=True)
+    run_dir = new_run_dir(ALGO)
+    run_id = os.path.basename(run_dir)
+    logs_dir = os.path.join(run_dir, "logs")
+    best_dir = os.path.join(run_dir, "best_model")
+    final_model_path = os.path.join(run_dir, "final_model")
+    print(f"[run] 出力先: {os.path.abspath(run_dir)}")
 
     # -------------------------------------------------------------------------
     # 2. ベクトル化環境の作成（SubprocVecEnv でサブプロセス並列）
@@ -60,7 +75,7 @@ def train(timesteps: int, n_envs: int, fall_penalty: float) -> None:
     vec_env = make_vec_env(
         ENV_ID,
         n_envs=n_envs,
-        monitor_dir=LOG_DIR,
+        monitor_dir=logs_dir,
         vec_env_cls=SubprocVecEnv if n_envs > 1 else DummyVecEnv,
         # 転倒ペナルティ(-100)を緩和する報酬整形を学習用 env にのみ適用する。
         # wrapper は Monitor の外側に入るため、Monitor が記録する ep_rew_mean は
@@ -77,7 +92,7 @@ def train(timesteps: int, n_envs: int, fall_penalty: float) -> None:
     # 総タイムステップ基準の頻度を保つよう n_envs で割る。
     checkpoint_callback = CheckpointCallback(
         save_freq=max(1000 // n_envs, 1),
-        save_path=LOG_DIR,
+        save_path=logs_dir,
         name_prefix="trpo_model",
     )
 
@@ -91,8 +106,8 @@ def train(timesteps: int, n_envs: int, fall_penalty: float) -> None:
     eval_env = DummyVecEnv([make_eval_env])
     eval_callback = EvalCallback(
         eval_env,
-        best_model_save_path=os.path.join(LOG_DIR, "best_model"),
-        log_path=os.path.join(LOG_DIR, "results"),
+        best_model_save_path=best_dir,
+        log_path=logs_dir,
         eval_freq=max(500 // n_envs, 1),
         deterministic=True,
         render=False,
@@ -118,27 +133,29 @@ def train(timesteps: int, n_envs: int, fall_penalty: float) -> None:
     # -------------------------------------------------------------------------
     # 6. 学習 → 最終モデル保存 → 後片付け
     # -------------------------------------------------------------------------
-    model.learn(total_timesteps=timesteps, callback=callbacks)
-    model.save(FINAL_MODEL)
+    model.learn(
+        total_timesteps=timesteps,
+        callback=callbacks,
+        tb_log_name=f"{ALGO.upper()}_{run_id}",
+    )
+    model.save(final_model_path)
     vec_env.close()
     eval_env.close()
+    return run_dir
 
 
-def play() -> None:
-    """保存済みモデルをロードし、1エピソードを録画して再生する。"""
-    # best_model があればそれを、無ければ最終モデルをロードする
-    best_model_path = os.path.join(LOG_DIR, "best_model", "best_model")
-    if os.path.exists(best_model_path + ".zip"):
-        model_path = best_model_path
-    elif os.path.exists(FINAL_MODEL + ".zip"):
-        model_path = FINAL_MODEL
-    else:
-        raise FileNotFoundError(
-            "学習済みモデルが見つかりません。先に `python trpo.py --mode train` を実行してください。"
-        )
+def play(run: Optional[str] = None) -> None:
+    """保存済みモデルをロードし、1エピソードを録画して再生する。
 
+    run（id/パス）指定が無ければ runs/<ALGO>/ の最新 run を使い、
+    run 内では best_model → final_model の順にフォールバックする。
+    """
+    run_dir = resolve_run_dir(ALGO, run)
+    model_path = resolve_model_path(run_dir)
+    video_folder = os.path.join(run_dir, "videos", "play")
+    print(f"[play] モデル: {os.path.abspath(model_path)}.zip")
     agent = TRPO.load(model_path)
-    record_agent_video(agent, ENV_ID, VIDEO_FOLDER, deterministic=True)
+    record_agent_video(agent, ENV_ID, video_folder, deterministic=True)
 
 
 def main() -> None:
@@ -157,6 +174,12 @@ def main() -> None:
         help="転倒時の報酬(-100)を緩和する置換値（既定: -40.0 / -100 で緩和なし=元の挙動）",
     )
     parser.add_argument(
+        "--run",
+        type=str,
+        default=None,
+        help="--mode play で再生する run（id またはパス。既定: 最新 run）",
+    )
+    parser.add_argument(
         "--mode",
         choices=["train", "play", "both"],
         default="both",
@@ -165,10 +188,11 @@ def main() -> None:
     args = parser.parse_args()
 
     start_time = time.perf_counter()
+    trained_run = None
     if args.mode in ("train", "both"):
-        train(args.timesteps, args.n_envs, args.fall_penalty)
+        trained_run = train(args.timesteps, args.n_envs, args.fall_penalty)
     if args.mode in ("play", "both"):
-        play()
+        play(args.run if args.run is not None else trained_run)
     elapsed = time.perf_counter() - start_time
     print(f"経過時間: {timedelta(seconds=round(elapsed))}（{elapsed:.1f} 秒）")
 
