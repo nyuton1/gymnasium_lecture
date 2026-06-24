@@ -19,6 +19,19 @@
         転倒時の報酬 -100 を小さい値に置き換える報酬整形ラッパー。
         各学習スクリプトが make_vec_env(wrapper_class=...) で学習用 env にのみ適用する。
 
+    SpeedRewardWrapper(env, fall_penalty=-40.0, speed_coef=0.0)
+        FallPenaltyWrapper の上位互換。転倒罰の緩和に加え、前進速度(obs[2])に
+        応じた報酬ボーナスを与えて「より速いゴール」を促す（tqc.py / crossq.py 用）。
+        speed_coef=0.0 のときは FallPenaltyWrapper と完全に等価。
+
+    measure_goal_time(model, env_id, n_episodes=10)
+        学習済みモデルを素の env で複数エピソード走らせ、ゴール到達までの
+        ステップ数・秒数・成功率を集計して表示する（~17 秒で着くかの確認用）。
+
+    linear_schedule(initial_value)
+        progress_remaining に比例して initial_value→0 へ線形減衰する学習率
+        スケジュール（SB3 の learning_rate に渡す callable）を返す。
+
     RecordBestVideoCallback(env_id, video_folder, min_interval_steps=0)
         EvalCallback の callback_on_new_best として使い、ベストモデル更新時に
         その時点のモデルから進捗動画を録画して履歴に残す SB3 コールバック。
@@ -67,6 +80,70 @@ class FallPenaltyWrapper(gym.Wrapper):
         if reward <= -100:  # 転倒（報酬がちょうど -100）のときだけ緩和
             reward = self.fall_penalty
         return obs, reward, terminated, truncated, info
+
+
+class SpeedRewardWrapper(gym.Wrapper):
+    """転倒罰の緩和に加え「前進速度ボーナス」を与える報酬整形ラッパー。
+
+    ``FallPenaltyWrapper`` の上位互換。BipedalWalker(Hardcore) の素の報酬は
+    主に「前進した距離」に対して支払われるため、ゴールまでの**所要時間（速さ）**は
+    強くは報われない。そこで非転倒ステップで前進速度に比例したボーナスを加え、
+    「同じゴールでもより速く着く」方策へ勾配を誘導する（教材の狙い: ~17 秒 ≒ 850
+    ステップ＠50FPS でのゴール）。
+
+    観測 ``obs[2]`` は正規化された水平速度（``0.3*vel.x*(VIEWPORT_W/SCALE)/FPS``、
+    正で前進）。``max(0.0, obs[2])`` により前進だけを加点し、後退・静止は加点しない。
+
+    転倒ステップ（報酬ちょうど -100）の扱いは ``FallPenaltyWrapper`` と同じく
+    ``fall_penalty`` への置換のみ。速度ボーナスは ``else`` 側＝非転倒ステップに
+    限定する（転倒罰に速度項を混ぜると罰の意味が壊れ、転倒時の速度も無意味なため）。
+    したがって ``speed_coef=0.0`` なら本ラッパーは ``FallPenaltyWrapper`` と完全に等価。
+
+    1 つのクラスに合成しているのは、``make_vec_env(wrapper_class=..., wrapper_kwargs=...)``
+    が**単一のラッパークラス**しか取れないため（リプレイ用 env を spawn する
+    SubprocVecEnv で pickle されるよう、モジュールレベルのクラスにしてある）。
+    報酬整形は**学習用 env にのみ**適用し、評価・再生は素の報酬を使う
+    （best_model 選定と所要時間計測を真の性能に保つため）。
+
+    Args:
+        env: ラップ対象の環境。
+        fall_penalty: 転倒時の報酬(-100)を置き換える値（既定 -40.0 / -100 で緩和なし）。
+        speed_coef: 前進速度ボーナスの係数（既定 0.0 = 速度ボーナス無効）。
+    """
+
+    def __init__(self, env, fall_penalty: float = -40.0, speed_coef: float = 0.0):
+        super().__init__(env)
+        self.fall_penalty = fall_penalty
+        self.speed_coef = speed_coef
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        if reward <= -100:  # 転倒（報酬がちょうど -100）→ 緩和のみ
+            reward = self.fall_penalty
+        elif self.speed_coef:  # 非転倒ステップにだけ前進速度ボーナスを加点
+            reward += self.speed_coef * max(0.0, float(obs[2]))
+        return obs, reward, terminated, truncated, info
+
+
+def linear_schedule(initial_value: float):
+    """progress_remaining に比例して initial_value→0 へ線形減衰する学習率を返す。
+
+    RL-Baselines3-Zoo の ``lin_7.3e-4`` 表記（学習率を線形に 0 へ減衰）を再現する
+    ヘルパー。SB3 は学習中、残り進捗 ``progress_remaining ∈ [0,1]``（開始時 1.0 →
+    終了時 0.0）を渡してこの callable を毎ロールアウト呼び、返り値を学習率に使う。
+    開始時は ``initial_value``、終了時は 0 になる。
+
+    返すのはモジュールレベル関数の閉包なので、``model.save`` 時に SB3 が
+    cloudpickle で問題なく直列化できる（``play()`` の推論では呼ばれない）。
+
+    Args:
+        initial_value: 開始時（progress_remaining=1.0）の学習率。
+    """
+
+    def func(progress_remaining: float) -> float:
+        return initial_value * progress_remaining
+
+    return func
 
 
 def _latest_video(video_folder: str) -> Optional[str]:
@@ -363,3 +440,99 @@ def resolve_model_path(run_dir: str) -> str:
     if os.path.exists(final + ".zip"):
         return final
     raise FileNotFoundError(f"run 内に学習済みモデルがありません: {run_dir}")
+
+
+def measure_goal_time(
+    model,
+    env_id: str,
+    n_episodes: int = 10,
+    deterministic: bool = True,
+) -> dict:
+    """学習済みモデルを素の env で n エピソード走らせ、ゴール到達時間を計測・集計する。
+
+    報酬整形ラッパーを付けない素の環境で評価するため、計測される所要時間・成功率は
+    真の性能を表す。各エピソードの結末を次の 3 つに分類する:
+      - success: terminated かつ転倒でない（コース右端＝ゴールに到達して終了）
+      - fall   : terminated かつ最終報酬 <= -100（転倒で終了）
+      - timeout: truncated（時間切れ。ゴール未到達）
+    （gymnasium の bipedal_walker は右端到達で terminated=True、転倒時のみ報酬 -100。）
+
+    成功エピソードについて到達ステップ数と秒数(=steps/fps)の平均・中央値、および
+    成功率を表示し、目標 ~17 秒（≒850 ステップ＠50FPS）に対する位置づけを示す。
+
+    Args:
+        model: predict を持つ学習済みモデル（TQC / CrossQ 等の非再帰方策）。
+        env_id: Gym 環境 ID。
+        n_episodes: 計測するエピソード数（既定 10）。
+        deterministic: 確定的行動で評価するか（既定 True / 評価向き）。
+
+    Returns:
+        集計値の dict（success_rate / mean_steps / median_steps / mean_seconds /
+        median_seconds / episodes）。成功 0 件のとき steps/seconds 系は None。
+    """
+    env = gym.make(env_id)
+    # 環境メタデータから FPS を取得（無ければ 50 にフォールバック）。
+    fps = env.metadata.get("render_fps") or 50
+
+    episodes = []
+    for ep in range(n_episodes):
+        obs, info = env.reset()
+        steps = 0
+        total_reward = 0.0
+        last_reward = 0.0
+        terminated = truncated = False
+        while True:
+            action, _ = model.predict(obs, deterministic=deterministic)
+            obs, reward, terminated, truncated, info = env.step(action)
+            steps += 1
+            total_reward += reward
+            last_reward = reward
+            if terminated or truncated:
+                break
+        fell = bool(terminated and last_reward <= -100)  # 転倒で終了
+        success = bool(terminated and not fell)           # ゴール到達で終了
+        outcome = "success" if success else ("fall" if fell else "timeout")
+        episodes.append(
+            {
+                "steps": steps,
+                "seconds": steps / fps,
+                "reward": float(total_reward),
+                "outcome": outcome,
+            }
+        )
+        print(
+            f"[measure] ep{ep + 1}/{n_episodes}: {outcome} "
+            f"steps={steps} ({steps / fps:.1f}s) reward={total_reward:.1f}"
+        )
+    env.close()
+
+    succ = [e for e in episodes if e["outcome"] == "success"]
+    success_rate = len(succ) / n_episodes
+    if succ:
+        steps_arr = [e["steps"] for e in succ]
+        secs_arr = [e["seconds"] for e in succ]
+        mean_steps = float(np.mean(steps_arr))
+        median_steps = float(np.median(steps_arr))
+        mean_seconds = float(np.mean(secs_arr))
+        median_seconds = float(np.median(secs_arr))
+        print(
+            f"[measure] 成功率 {success_rate:.0%}（{len(succ)}/{n_episodes}）/ "
+            f"成功時の到達: 平均 {mean_steps:.0f}step({mean_seconds:.1f}s) "
+            f"中央値 {median_steps:.0f}step({median_seconds:.1f}s)"
+        )
+        print(f"[measure] 目標 ~17s（≒850step）に対し、成功時の中央値は {median_seconds:.1f}s です")
+    else:
+        mean_steps = median_steps = mean_seconds = median_seconds = None
+        print(
+            f"[measure] 成功率 0%（{n_episodes} エピソード中ゴール到達なし）。"
+            "本番学習でステップ数を増やすか --speed-coef を調整してください。"
+        )
+
+    return {
+        "success_rate": success_rate,
+        "mean_steps": mean_steps,
+        "median_steps": median_steps,
+        "mean_seconds": mean_seconds,
+        "median_seconds": median_seconds,
+        "episodes": episodes,
+    }
