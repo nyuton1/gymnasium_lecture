@@ -35,6 +35,7 @@ import glob
 import os
 import subprocess
 import sys
+from datetime import datetime
 from typing import Optional
 
 import gymnasium as gym
@@ -282,3 +283,76 @@ class RecordBestVideoCallback(BaseCallback):
         except Exception as exc:  # 録画失敗で長時間学習を止めない
             print(f"[progress-video] 録画に失敗しました（学習は継続）: {exc}")
         return True
+
+
+# =============================================================================
+# run ディレクトリ管理（全アルゴリズム共通）
+# =============================================================================
+# 1 回の学習に関わる全成果物（logs / best_model / videos / final_model）を、
+# 上書きを避けてタイムスタンプ別フォルダ runs/<algo>/<YYYYMMDD-HHMMSS-pid>/ に
+# 自己完結させる。各スクリプトの train()/play() はここを呼んで run を作成・解決する。
+RUNS_ROOT = "runs"
+
+
+def new_run_dir(algo: str) -> str:
+    """この学習専用の run ディレクトリ runs/<algo>/<run_id>/ を作成して返す。
+
+    run_id は ``YYYYMMDD-HHMMSS-<pid>``。並列に複数 run を起動しても衝突しないよう
+    PID を付ける（同じ秒でも PID で区別され、辞書順ソートの「最新」判定も保たれる）。
+    monitor/checkpoint 用に ``logs/`` も同時に作成する。
+    """
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"
+    run_dir = os.path.join(RUNS_ROOT, algo, run_id)
+    os.makedirs(os.path.join(run_dir, "logs"), exist_ok=True)
+    return run_dir
+
+
+def latest_run_dir(algo: str) -> Optional[str]:
+    """runs/<algo>/ 内で辞書順（=時系列）最大の run ディレクトリを返す。無ければ None。
+
+    run_id は ``YYYYMMDD-HHMMSS-...`` 形式で辞書順 = 時系列順になる。``_`` や ``.`` で
+    始まるエントリ（runs/_stdout_logs や .DS_Store 等、run ではないもの）は除外する。
+    """
+    algo_root = os.path.join(RUNS_ROOT, algo)
+    if not os.path.isdir(algo_root):
+        return None
+    runs = sorted(
+        d
+        for d in glob.glob(os.path.join(algo_root, "*"))
+        if os.path.isdir(d) and not os.path.basename(d).startswith(("_", "."))
+    )
+    return runs[-1] if runs else None
+
+
+def resolve_run_dir(algo: str, run: Optional[str] = None) -> str:
+    """再生対象の run ディレクトリを解決する。
+
+    run が id（runs/<algo>/ 配下のフォルダ名）またはパスならそれを、None なら
+    最新 run を返す。指定 run が見つからない／run が1つも無い場合は FileNotFoundError。
+    """
+    if run is not None:
+        run_dir = run if os.path.isdir(run) else os.path.join(RUNS_ROOT, algo, run)
+        if not os.path.isdir(run_dir):
+            raise FileNotFoundError(f"指定された run が見つかりません: {run}")
+        return run_dir
+    run_dir = latest_run_dir(algo)
+    if run_dir is None:
+        raise FileNotFoundError(
+            f"runs/{algo}/ に run が見つかりません。"
+            f"先に `python {algo}.py --mode train` を実行してください。"
+        )
+    return run_dir
+
+
+def resolve_model_path(run_dir: str) -> str:
+    """run 内のモデルパス（拡張子なし）を best_model → final_model の順に返す。
+
+    どちらの .zip も無ければ FileNotFoundError。
+    """
+    best = os.path.join(run_dir, "best_model", "best_model")
+    final = os.path.join(run_dir, "final_model")
+    if os.path.exists(best + ".zip"):
+        return best
+    if os.path.exists(final + ".zip"):
+        return final
+    raise FileNotFoundError(f"run 内に学習済みモデルがありません: {run_dir}")
