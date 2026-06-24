@@ -36,7 +36,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Callable, Optional
 
 import gymnasium as gym
 import numpy as np
@@ -163,6 +163,7 @@ def record_agent_video(
     name_prefix: str = "rl-video",
     open_player: bool = True,
     recurrent: bool = False,
+    obs_transform: Optional[Callable] = None,
 ):
     """学習済みエージェントを 1 エピソード実行して動画に録画し、表示する。
 
@@ -183,6 +184,10 @@ def record_agent_video(
             (episode_start)を渡し、ステップ間で隠れ状態を引き継ぐ。これを渡さないと
             毎ステップ隠れ状態がゼロにリセットされ、再帰方策が正しく動かない。
             非再帰方策（A2C/PPO/TRPO/DDPG/TD3/SAC）では False のままでよい。
+        obs_transform: 観測を predict に渡す前に変換する関数（既定 None＝変換しない）。
+            VecNormalize で学習したモデル（例: ppo.py）の再生で、学習時の統計に合わせて
+            観測を正規化するために使う（VecNormalize.normalize_obs を渡す）。env へ返す
+            obs 自体は素のまま保持し、推論入力だけを変換する。
     """
     # rgb_array モードで環境を作り、RecordVideo でラップして録画する
     env = gym.make(env_id, render_mode="rgb_array")
@@ -198,16 +203,18 @@ def record_agent_video(
     lstm_states = None
     episode_starts = np.ones((1,), dtype=bool)
     while True:
+        # 必要なら推論直前に観測を正規化する（VecNormalize 学習モデルの再生など）。
+        pred_obs = obs_transform(obs) if obs_transform is not None else obs
         if recurrent:
             # LSTM 隠れ状態を引き継ぎながら推論する（RecurrentPPO 等）。
             action, lstm_states = agent.predict(
-                obs,
+                pred_obs,
                 state=lstm_states,
                 episode_start=episode_starts,
                 deterministic=deterministic,
             )
         else:
-            action, _states = agent.predict(obs, deterministic=deterministic)
+            action, _states = agent.predict(pred_obs, deterministic=deterministic)
         obs, reward, done, truncated, info = env.step(action)
         episode_starts = np.array([done or truncated])
         if done or truncated:
