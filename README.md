@@ -119,15 +119,21 @@ python a2c.py --fall-penalty -100    # 緩和なし（元の挙動に戻す）
 
 ## 生成されるファイル
 
+1 回の学習に関わる成果物は、上書きを避けてタイムスタンプ別の run フォルダ
+`runs/<algo>/<YYYYMMDD-HHMMSS-pid>/` にまとめて隔離されます（同じ設定で再学習しても過去 run は消えません）。
+
 | パス | 内容 |
 |---|---|
-| `<algo>_logs_bipedalwalkerhardcore/` | チェックポイント、評価ログ |
-| `<algo>_logs_bipedalwalkerhardcore/best_model/best_model.zip` | 評価で最高性能だったモデル（`play` はこれをロード） |
-| `<algo>_bipedalwalkerhardcore.zip` | 学習終了時点の最終モデル |
-| `<algo>_bipedalwalkerhardcore_videos_practice/rl-video-episode-0.mp4` | 再生時に録画した動画 |
+| `runs/<algo>/<run_id>/logs/` | チェックポイント・monitor・評価ログ |
+| `runs/<algo>/<run_id>/best_model/best_model.zip` | 評価で最高性能だったモデル（`play` はこれをロード） |
+| `runs/<algo>/<run_id>/final_model.zip` | 学習終了時点の最終モデル |
+| `runs/<algo>/<run_id>/videos/play/rl-video-episode-0.mp4` | 再生時に録画した動画 |
+| `runs/<algo>/<run_id>/videos/progress/*.mp4` | 学習中の進捗動画（**SAC のみ**） |
 | `tensorboard/` | TensorBoard 用ログ（全アルゴリズム共通） |
 
 `<algo>` は `a2c` / `ddpg` / `td3` / `sac` / `trpo` / `ppo` / `recurrent_ppo`。
+`--mode play` は既定で最新 run を再生します。`--run <id またはパス>` で特定の run を指定できます。
+`runs/` は丸ごと `.gitignore` 済みです。
 
 - **再生の挙動**: スクリプト実行時、`gym_utils.display_video` が録画した mp4 の
   パスを表示し、OS 既定のプレーヤで自動再生します。
